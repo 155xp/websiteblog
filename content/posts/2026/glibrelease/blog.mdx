@@ -1,0 +1,159 @@
+---
+title: "Introducing Glib-01"
+date: "2026-02-16"
+description: "How Smart Can a Chess Engine Be Under 1 Megabyte?"
+tags: ["building", "ai"]
+---
+
+# Modern chess engines are monsters.
+
+At the top sits **Stockfish** - an open-source engine that has dominated computer chess for over a decade. It miraculously evaluates tens of millions of permissions per second, incorporates decades of handcrafted evaluation heuristics, and now even integrats NNUE into its search.
+
+The problem? Stockfish is not small.
+
+Glib-01 is the opposite.
+
+Glib-01 asks a different question
+
+> *How much of Stockfish's intelligence can be compressed into less than 1 megabyte?*
+
+## The Core Idea: Distillation
+
+Glib-01 is not trained from games.
+
+It is trained by **Distillation**.
+
+Distillation means:
+- Use a powerful model (Stockfish in our case)
+- Ask it to perform over 150,000,000 search-node evaluations
+- Train a much smaller model to imitate its outputs
+
+
+In other words:
+Stockfish is actively teaching Glib-01.
+
+
+Every board position goes through a three step process.
+1. Stockfish evaluates the position in centipawns (the value of 1/100th a pawn)
+2. Normalize the evaluation
+3. Glib-01 learns to predict that number directly from the board.
+
+There is no search inside of Glib-01. It only learns from supervision.
+
+---
+
+## The Constraint
+
+1 megayte = 1,048,576 bytes. With float 32 weights (4 bytes per parameter), that gives a hard upper bound of **~262,144** parameters.
+
+Glib-01, through its 13x8x8 encoding format, only uses 246,273 parameters, which fits in **~985kb**. Phew, that was close.
+
+Let's take a step back though. What is this 13x8x8 encoding format?
+
+---
+
+## The Architecture
+
+**Input Encoding:**
+
+**13**x8x8
+
+- 6 planes for white pieces
+- 6 planes for black pieces
+- 1 plane for side-to-move (optional, but would've required flipping the board after every turn in inference.)
+
+Total: 13 x 8 x 8 = 832 inputs.
+
+
+**Activation**
+- GeLu hidden layers
+- Tanh output (to match normalized centipawn range)
+
+In short terms:
+
+It sees a board, it outputs a scalar.
+
+That's it.
+
+
+
+To train Glib-01, I generated 75,000 chess positions. 80% midgame, 20% low-material endgames.
+
+Each position is evaluated using Stockfish at 2000 search nodes. In total, this required **150 million** Stockfish search-node evaluations.
+
+### Target Transformation
+
+The centipawn evaluation is normalized using **tanh(cp/400)**
+This compresses evaluations to be in between [-1, 1].
+
+---
+
+## Training the model
+
+Because we took this distillation method rather than training off real user games, ther is no reinforcement learning, just distilled evaluation.
+
+The goal? Minimize the difference between Glib-01's evaluation and Stockfish's evaluation.
+
+The setup we use is
+
+- AdamW optimizer (want to experiment with Muon optimizer, will do so in the future)
+- Cosine learning rate schedule
+- Batch size: 1024
+- Epochs: 15
+- MSE loss
+- Mixed percision when available
+
+---
+
+## Performance
+
+After training on 75,000 distilled positions, Glib-01 reaches rougly **~1100 Elo**. This is club-level strength.
+
+Important context:
+- There is no search.
+- There is no move generation logic beyond picking the move with highest evaluation.
+- There is no opening book.
+- There are no endgame tablebases.
+- The entire network is under 1 MB.
+- It's endgame playing is WEAK in comparison to it's ability to shine otherwise (i suspect this to be a faulty split in how I generated my data)
+
+Despite that, it:
+- Understands material
+- Avoids hanging pieces most of the time
+- Learned common opening tactics
+- Finds basic tactics
+- Plays structurally reasonable moves
+
+However, it struggles with:
+- Deep tactics
+- Long endgame conversions
+- Zugzwang (a chess term where a player is put at a disadvantage because they are forced to make a move, as any legal move will worsen their position)
+- Long-term king safety
+- Multi-move sacrifices
+
+Because it does not calculate. It only evaluates, and evaluation without search has its limits.
+
+
+It is clearly "aware" of chess patterns.
+And all of that fits in less space than a typical image file.
+
+---
+
+## What this means
+
+Stockfish is a massive, highly engineered system. Glib-01 is a distilled shadow of it. The interesting result is not that Glib-01 is strong, it's that a measurable of grandmaster-level evaluation knowledge can be compressed into under 1 megabyte.
+
+It suggests something important about intelligence -- much of it is strucutred compression.
+
+## Future Directions
+
+- Replace MLP with a tiny CNN (still under 1mb)
+- Quantize to float16 or int8 to increase parameter count within the same memory
+- Increase data to 1,000,000 positions
+- Look at newer ML methods such as Muon optimizer or other methods to allow the model to be smarter
+
+
+At **~1100 Elo** and under 1MB, Glib-01 suggests the lower bound of chess intelligence is suprisingly compact, and I cannot wait to work on this further and release new versions of Glib-01 sometime.
+
+
+
