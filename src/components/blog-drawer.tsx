@@ -28,7 +28,7 @@ export function BlogDrawer({ slug, onClose }: BlogDrawerProps) {
     }
 
     setLoading(true);
-    fetch(`/api/post?slug=${encodeURIComponent(slug)}`)
+    fetch(`/data/posts/${encodeURIComponent(slug)}.json`)
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         setPost(data);
